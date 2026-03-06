@@ -240,11 +240,51 @@
            (when (seq bad-vals)
              (str "bad: " (pr-str (into {} bad-vals))))))))))
 
-;; ── 10. No inline style= attributes ─────────────────────────────────────────
+;; ── 10. No inline :style attributes (advisory) ─────────────────────────────────────────
 ;; AGENTS.org forbids adding new inline :style in hiccup.
 ;; Pre-existing occurrences in layout.cljs / views.cljs are grandfathered.
 ;; This check is advisory: it prints warnings but does NOT fail the suite,
 ;; so that a clean checkout still exits 0 while new violations remain visible.
+
+;; ── 11. No top-level rf/subscribe calls ────────────────────────────────────────
+;; Subscriptions must be created at runtime inside a function.  A common
+;; mistake is to call `(rf/subscribe …)` in a `def` initializer or at the
+;; namespace level; that subscription will be evaluated when the namespace is
+;; loaded, before handlers are registered, leading to nil values (and the
+;; dreaded “black screen” bug).  This check traverses each file’s AST and
+;; flags any `rf/subscribe` form reached while in the top-level context.
+(defn check-no-top-level-subscribe []
+  (println (str "\n" bold "11. No top-level rf/subscribe calls" reset))
+  (doseq [f (all-src-files)]
+    (let [ast (parse-file f)
+          found? (atom false)]
+      (letfn [(fnwalk [form ctx]
+                (cond
+                  ;; direct subscribe in top-level context → violation
+                  (and (seq? form)
+                       (= (first form) 'rf/subscribe)
+                       (= ctx :top))
+                  (reset! found? true)
+
+                  ;; entering a function definition/body
+                  (and (seq? form)
+                       (#{'defn 'defn- 'fn 'fn*} (first form)))
+                  (doseq [sub (rest form)]
+                    (fnwalk sub :fn))
+
+                  ;; otherwise descend with same context
+                  (seq? form)
+                  (doseq [sub form]
+                    (fnwalk sub ctx))
+
+                  :else
+                  nil))]
+        (fnwalk ast :top)
+        (if-not @found?
+          (pass (str f " has no top-level rf/subscribe"))
+          (do
+            (fail (str f " has top-level rf/subscribe call"))
+            (swap! errors inc)))))))
 
 (defn check-no-inline-styles []
   (println (str "\n" bold "10. No inline :style attributes (advisory)" reset))
@@ -256,7 +296,7 @@
         (info (str f " — " (count hits) " inline :style occurrence(s)"
                    " (pre-existing; remove when convenient)"))))))
 
-;; ── 11. Build artifact ───────────────────────────────────────────────────────
+;; ── 12. Build artifact ───────────────────────────────────────────────────────
 
 (defn check-build-artifact []
   (println (str "\n" bold "11. Build artifact" reset))
@@ -281,6 +321,7 @@
   (check-level-definitions)
   (check-emulation-map)
   (check-no-inline-styles)
+  (check-no-top-level-subscribe)
   (check-build-artifact)
 
   (println)

@@ -19,7 +19,7 @@
       :about   [views/about-page]
       :learn   [views/learn-page]
       :compare [views/compare-page]
-      :layout  [layout/page]
+      :layout  [views/layout-page]
       :section [views/section-page (:topic route)]
       ;; fallback
       [views/index-page])))

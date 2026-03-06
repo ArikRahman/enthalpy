@@ -44,7 +44,7 @@
     [:a.site-nav__logo
      {:href "#/"
       :on-click #(do (.preventDefault %) (router/navigate-to-index!))}
-     "Enthium " [:span "v14"]]
+     "Enth" [:span "alpy"]]
     [:ul.site-nav__links
      [:li [:a {:href "#/"
                :on-click #(do (.preventDefault %) (router/navigate-to-index!))}

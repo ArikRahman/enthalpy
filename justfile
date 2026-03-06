@@ -66,6 +66,15 @@ verify: check test
 # Run the full verify suite then a production build — use before committing
 ci: verify build
 
+# Build, commit all changes (including docs/), and push to GitHub Pages.
+# GitHub Pages serves docs/ from the main branch — no separate gh-pages branch needed.
+# Usage: just deploy           (uses default message "deploy")
+#        just deploy "message"
+deploy msg="deploy": test build
+    jj commit -m "{{msg}}"
+    jj bookmark set main --revision @-
+    jj git push --bookmark main
+
 # ── Utilities ─────────────────────────────────────────────────────────────────
 
 # Count lines of ClojureScript source

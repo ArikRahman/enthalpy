@@ -1,92 +1,38 @@
 (ns enthalpy.trainer
   (:require [reagent.core :as r]
+            [re-frame.core :as rf]
             [enthalpy.words :as words]
             [enthalpy.layout :as layout]
             [enthalpy.emulation :as emulation]))
 
-;; ---------------------------------------------------------------------------
-;; State atom
-;; ---------------------------------------------------------------------------
-
-(def state
-  (r/atom
-   {:level          1
-    :mode           :words    ; :words | :time
-    :limit          15        ; word count OR seconds depending on :mode
-    :words          []        ; current prompt word list
-    :word-index     0         ; index of the word the user is currently typing
-    :input          ""        ; live value of the text input
-    :input-error?   false     ; true when current input doesn't match target prefix
-    :hits           0         ; correctly completed words
-    :errors         0         ; total error keystrokes
-    :started?       false     ; true once the user types the first character
-    :finished?      false
-    :start-ms       nil       ; js/Date.now() at first keystroke
-    :elapsed-ms     0         ; ms since start, updated by timer loop
-    :raf-id         nil       ; requestAnimationFrame handle for the timer
-    :show-cheat?    true
-    :sound-stroke?  false
-    :sound-error?   false
-    :allow-caps?    false
-    :allow-punct?   false
-    :backspace-req? false
-    :emulate-qwerty? false})) ; translate physical US QWERTY keys to Enthium positions
+(defn- current-state []
+  @(rf/subscribe [:trainer]))
 
 ;; ---------------------------------------------------------------------------
 ;; Timer — runs via requestAnimationFrame while the round is active
 ;; ---------------------------------------------------------------------------
 
 (defn- tick! [start-ms]
-  (let [now   (js/Date.now)
-        id    (js/requestAnimationFrame (fn [_] (tick! start-ms)))]
-    (swap! state assoc
-           :elapsed-ms (- now start-ms)
-           :raf-id     id)))
+  (let [id (js/requestAnimationFrame (fn [_] (tick! start-ms)))]
+    (rf/dispatch [:trainer/tick start-ms id])))
 
 (defn- start-timer! []
-  (let [start (js/Date.now)]
-    (swap! state assoc :start-ms start)
-    (let [id (js/requestAnimationFrame (fn [_] (tick! start)))]
-      (swap! state assoc :raf-id id))))
+  (let [start (js/Date.now)
+        id    (js/requestAnimationFrame (fn [_] (tick! start)))]
+    (rf/dispatch [:trainer/start-timer start id])))
 
 (defn- stop-timer! []
-  (when-let [id (:raf-id @state)]
+  (when-let [id (:raf-id (current-state))]
     (js/cancelAnimationFrame id)
-    (swap! state assoc :raf-id nil)))
+    (rf/dispatch [:trainer/stop-timer])))
 
 ;; ---------------------------------------------------------------------------
 ;; Round management
 ;; ---------------------------------------------------------------------------
 
-(defn- gen-words [s]
-  (let [{:keys [level mode limit allow-caps? allow-punct?]} s]
-    (cond
-      (= level 8)
-      (vec (words/sentences-for-round (min 10 limit)))
-
-      (= mode :time)
-      ;; for time mode, generate more words than we'll ever need
-      (vec (words/words-for-round level 200 allow-caps?))
-
-      :else
-      (vec (words/words-for-round level limit allow-caps?)))))
-
 (defn init-round! []
   (stop-timer!)
-  (let [s @state
-        ws (gen-words s)]
-    (swap! state assoc
-           :words       ws
-           :word-index  0
-           :input       ""
-           :input-error? false
-           :hits        0
-           :errors      0
-           :started?    false
-           :finished?   false
-           :start-ms    nil
-           :elapsed-ms  0
-           :raf-id      nil)))
+  (rf/dispatch [:trainer/reset-round]))
 
 (defn reset-round! []
   (init-round!))
@@ -117,7 +63,7 @@
 
 (defn- finish-round! []
   (stop-timer!)
-  (swap! state assoc :finished? true))
+  (rf/dispatch [:trainer/finish-round]))
 
 (defn- check-time-limit! [s]
   (when (and (= (:mode s) :time)
@@ -128,70 +74,36 @@
   "Called on every keystroke in the typing input.
    `new-val` is the full current value of the <input>."
   [new-val]
-  (let [s @state]
+  (let [s (current-state)]
     (when (and (:started? s) (not (:finished? s)))
       (check-time-limit! s))
     (when (not (:finished? s))
-      (let [target-word (nth (:words s) (:word-index s) nil)]
-        (cond
-          ;; ── no target word (shouldn't happen) ─────────────────────────
-          (nil? target-word)
-          nil
-
-          ;; ── space pressed → attempt word submission ───────────────────
-          (clojure.string/ends-with? new-val " ")
-          (let [typed (clojure.string/trim new-val)]
-            (if (= typed target-word)
-              ;; correct word
-              (let [next-idx  (inc (:word-index s))
-                    new-hits  (inc (:hits s))
-                    done?     (and (= (:mode s) :words)
-                                   (>= new-hits (:limit s)))]
-                (swap! state assoc
-                       :word-index   next-idx
-                       :hits         new-hits
-                       :input        ""
-                       :input-error? false)
-                (when done? (finish-round!)))
-              ;; wrong word
-              (swap! state assoc
-                     :errors       (inc (:errors s))
-                     :input        (if (:backspace-req? s) new-val "")
-                     :input-error? true)))
-
-          ;; ── normal keypress → update input + validate prefix ──────────
-          :else
-          (let [error? (and (seq new-val)
-                            (not (clojure.string/starts-with? target-word new-val)))]
-            (when (and (not (:started? s)) (seq new-val))
-              (swap! state assoc :started? true)
-              (start-timer!))
-            (swap! state assoc
-                   :input        new-val
-                   :input-error? error?
-                   :errors       (if error?
-                                   (inc (:errors s))
-                                   (:errors s)))))))))
+      (when (and (not (:started? s)) (seq new-val))
+        (start-timer!))
+      (rf/dispatch [:trainer/input-change new-val])
+      (let [new-s (current-state)]
+        (when (:finished? new-s)
+          (finish-round!))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Toolbar toggle helpers
 ;; ---------------------------------------------------------------------------
 
 (defn toggle! [k]
-  (swap! state update k not))
+  (rf/dispatch [:trainer/toggle k]))
 
 (defn set-level! [n]
-  (swap! state assoc :level n)
+  (rf/dispatch [:trainer/set-level n])
   (init-round!))
 
 (defn set-mode! [m]
-  (swap! state assoc :mode m)
+  (rf/dispatch [:trainer/set-mode m])
   (init-round!))
 
 (defn set-limit! [v]
   (let [n (js/parseInt v 10)]
     (when (pos? n)
-      (swap! state assoc :limit n)
+      (rf/dispatch [:trainer/set-limit n])
       (init-round!))))
 
 ;; ---------------------------------------------------------------------------
@@ -211,7 +123,7 @@
     Backspace → remove last character from :input and re-validate"
   [e]
   (let [key (.-key e)
-        s   @state]
+        s   (current-state)]
     (when (not (:finished? s))
       (cond
         ;; Tab → reset round
@@ -261,7 +173,7 @@
    (if (= n 8) "S" (str n))])
 
 (defn- level-selector []
-  (let [{:keys [level]} @state]
+  (let [{:keys [level]} (current-state)]
     [:div.trainer-levels
      (for [n (range 1 9)]
        ^{:key n} [level-btn n level])]))
@@ -274,7 +186,7 @@
 
 (defn- settings-row []
   (let [{:keys [mode limit show-cheat? sound-stroke? sound-error?
-                allow-caps? allow-punct? backspace-req? emulate-qwerty?]} @state]
+                allow-caps? allow-punct? backspace-req? emulate-qwerty?]} (current-state)]
     [:div.trainer-settings
      ;; mode
      [toggle-btn "Words" (= mode :words) #(set-mode! :words)]
@@ -305,7 +217,7 @@
   [:span {:class (str "trainer-word trainer-word--" (name state))} text " "])
 
 (defn- prompt-display []
-  (let [{:keys [words word-index]} @state]
+  (let [{:keys [words word-index]} (current-state)]
     [:div.trainer-prompt
      (map-indexed
       (fn [idx w]
@@ -319,7 +231,7 @@
 ;; ── Input area ──────────────────────────────────────────────────────────────
 
 (defn- input-area []
-  (let [{:keys [input input-error? finished? words word-index emulate-qwerty?]} @state
+  (let [{:keys [input input-error? finished? words word-index emulate-qwerty?]} (current-state)
         target (nth words word-index nil)]
     [:div.trainer-input-area
      [:input#trainer-input.trainer-input
@@ -351,7 +263,7 @@
 ;; ── Stats bar ───────────────────────────────────────────────────────────────
 
 (defn- stats-bar []
-  (let [{:keys [hits errors elapsed-ms mode limit word-index started?] :as s} @state]
+  (let [{:keys [hits errors elapsed-ms mode limit word-index started?] :as s} (current-state)]
     [:div.trainer-stats
      [:span.trainer-stat
       [:span.trainer-stat-label "WPM"]
@@ -372,7 +284,7 @@
 ;; ── Results overlay ─────────────────────────────────────────────────────────
 
 (defn- results-overlay []
-  (let [s @state]
+  (let [s (current-state)]
     [:div.trainer-results
      [:div.trainer-results-card
       [:h2.trainer-results-title "Round complete!"]
@@ -419,7 +331,7 @@
 
     :reagent-render
     (fn []
-      (let [{:keys [finished? show-cheat?]} @state]
+      (let [{:keys [finished? show-cheat?]} (current-state)]
         [:div.trainer
          [:div.trainer-header
           [:h1.trainer-title "Enthium " [:span "v14"] " Trainer"]

@@ -1,10 +1,10 @@
 (ns enthalpy.router
-  (:require [reagent.core :as r]))
+  (:require [re-frame.core :as rf]))
 
 ;; Single source of truth for the current page.
 ;; Shape: {:page :index} | {:page :learn} | {:page :compare}
 ;;        {:page :layout} | {:page :section :topic "learn"}
-(def current-route (r/atom {:page :index}))
+(def current-route (rf/subscribe [:route]))
 
 (defn parse-hash
   "Convert a location.hash string (including leading #) into a route map."
@@ -61,6 +61,6 @@
 (defn init!
   "Attach hashchange listener and sync current-route with the current URL."
   []
-  (let [sync! #(reset! current-route (parse-hash (.-hash js/location)))]
+  (let [sync! #(rf/dispatch [:set-route (parse-hash (.-hash js/location))])]
     (.addEventListener js/window "hashchange" sync!)
     (sync!)))

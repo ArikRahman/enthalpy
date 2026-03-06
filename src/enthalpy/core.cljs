@@ -1,9 +1,12 @@
 (ns enthalpy.core
   (:require [reagent.core :as r]
             [reagent.dom :as rdom]
+            [re-frame.core :as rf]
             [enthalpy.router :as router]
             [enthalpy.views :as views]
-            [enthalpy.layout :as layout]))
+            [enthalpy.layout :as layout]
+            [enthalpy.events :as events]
+            [enthalpy.subs :as subs]))
 
 ;; ---------------------------------------------------------------------------
 ;; Root component — dispatches on (:page @router/current-route)
@@ -26,6 +29,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn init []
+  (rf/dispatch-sync [:initialize-db])
   (router/init!)
   (rdom/render [app] (.getElementById js/document "app")))
 

@@ -1,27 +1,46 @@
-# Colemak Camp
-A fork of Colemak Club that overhauls the entire experience. Brings support for custom themes and a wider range of display sizes.
+# Enthalpy
 
-It is hosted on this repo's [Github Pages](https://colemakcamp.github.io/).
+A ClojureScript rewrite of the ColemakCamp typing trainer, re‑focused around
+the Enthium v14 keyboard layout.  The site is a static single‑page application
+compiled with shadow‑cljs and served from the `docs/` directory (GitHub Pages).
 
-Note that this project is a fork of [Colemak Club](https://github.com/gnusenpai/colemakclub), which itself is a fork of [Colemak Academy](https://colemak.academy/).
+The primary feature is an interactive typing trainer with progressive levels,
+a live cheatsheet keyboard and real‑time WPM/accuracy scoring.  Secondary
+pages provide layout rationale, performance statistics, a comparison table,
+and learning documentation, all reachable via hash routes.
+
+The original ColemakCamp JavaScript source is kept in the repository root for
+reference only; the active ClojureScript code lives under `src/enthalpy`.
 
 ## Key Features
-The following features are new in Colemak Camp:
-- Responsive design, fits in more display sizes.
-- Customizable theme colors, including light and dark modes.
-- Several more menu options are now saved in local storage, thus remembered if you refresh.
-- Cheatsheet keyboard is sized more accurately.
-- Custom input keyboard changes according to selected keyboard type.
-- Overall change in the design language.
-- Persistent custom layout via local storage.
-- Support for phones and tablets running Android (and iOS hopefully).
 
-### Planned Features
-- Custom themes.
-- Sharing and loading custom themes via links.
+- Typing trainer powered by **Reagent** and **re-frame**; global application
+  state lives in a single `app-db`.
+- Progressive level system (1‑8) with letter sets tuned to Enthium v14
+  home‑row frequency.
+- QWERTY‑emulation mode (“US KB”) for users typing on a physical US QWERTY
+  layout.
+- Live cheatsheet keyboard and finger‑colour legend.
+- Time/word modes, adjustable limits, and optional caps/punctuation/backspace
+  requirements.
+- Supplementary documentation pages (rationale, layout, comparison, FAQ) with
+  hash‑based routing.
+- Build & dev workflow driven by `just` / Shadow‑CLJS, using Bun as the JS
+  runtime.
+
+### Development
+
+1. `just install` – install Bun dependencies.
+2. `just dev` – start Shadow‑CLJS with hot‑reload at <http://localhost:3000>.
+3. `just build` – produce a production bundle in `docs/js`.
+4. `just check` / `just test` – perform syntax checks and run the integrity
+   test suite (`clj -M scripts/test.clj`).
+
 
 ## License
-This project is under the **[GNU Affero General Public License v3.0 (AGPL-3.0)](https://www.gnu.org/licenses/agpl-3.0.en.html)**, which is the same as Colemak Club and Colemak Academy, as seen in this [issue](https://github.com/Nemcorp/layoutacademy/issues/2).
+The ClojureScript code in this repository is licensed under the
+**[GNU Affero General Public License v3.0 (AGPL‑3.0)](https://www.gnu.org/licenses/agpl-3.0.en.html)**,
+matching the original ColemakCamp project; see `LICENSE` for full text.
 
 Parts of the project that are not a part of this license are mentioned in this table:
 | Project Name                                                                            | Project License   |

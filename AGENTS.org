@@ -32,7 +32,7 @@ The ClojureScript rewrite lives in ``src/`` and compiles to ``docs/``.
 - Level letter sets: redefined in Enthium frequency order (highest-freq letters
   first), not Colemak order.
 - Branding, copy, and colours: Enthium/Enthalpy identity.
-- Stack: ClojureScript + Reagent instead of vanilla JS. All state in Reagent atoms.
+- Stack: ClojureScript + Reagent + re-frame. Global state in re-frame db.
 - Supplementary docs: rationale, stats, compare, and learning-guide pages added
   as hash routes alongside the trainer.
 
@@ -41,6 +41,7 @@ The ClojureScript rewrite lives in ``src/`` and compiles to ``docs/``.
 |------------------+-----------------------------------------------|
 | Language         | ClojureScript                                 |
 | UI               | Reagent 1.2.0                                 |
+| State Management | re-frame 1.3.0                                |
 | Build            | shadow-cljs                                   |
 | Package Manager  | Bun — the ONLY runtime. Never use npx or npm. |
 | Routing          | Custom hash-based (no extra deps)             |
@@ -53,9 +54,12 @@ enthalpy/
 ├── src/
 │   └── enthalpy/
 │       ├── core.cljs          ; Entry point — mounts Reagent app
-│       ├── router.cljs        ; Hash-based router, current-route atom
+│       ├── db.cljs            ; Default app-db state definitions
+│       ├── events.cljs        ; re-frame event handlers (logic, timers)
+│       ├── subs.cljs          ; re-frame subscriptions (state selectors)
+│       ├── router.cljs        ; Hash-based router (uses re-frame for route)
 │       ├── views.cljs         ; Page-level components (trainer, docs pages)
-│       ├── trainer.cljs       ; Typing trainer state machine + components
+│       ├── trainer.cljs       ; Typing trainer components (uses re-frame)
 │       ├── words.cljs         ; Word list data + level-filtered word picker
 │       ├── emulation.cljs     ; US QWERTY → Enthium physical-key map + helpers
 │       ├── data.cljs          ; Documentation section registry
@@ -93,7 +97,8 @@ but are not served. GitHub Pages is configured to serve from ``docs/``.
 | #/compare        | ``views/compare-page``       | Layout comparison table          |
 | #/sections/TOPIC | ``views/section-page``       | Individual section               |
 
-Routing is handled in ``router.cljs`` via a single Reagent atom ``current-route``.
+Routing is handled in ``router.cljs`` via the re-frame subscription ``[:route]``.
+The actual route map is synced to the app-db via the ``:set-route`` event.
 ``core.cljs`` dispatches on ``(:page route)`` with ``case``.
 
 To add a new route:
@@ -103,13 +108,13 @@ To add a new route:
 4. Add the page component in ``views.cljs``.
 
 * Typing Trainer Architecture
-All trainer state lives in a single Reagent atom in ``trainer.cljs``.
+All trainer state lives in the global re-frame ``app-db``, defined in ``db.cljs`` and managed via ``events.cljs`` and ``subs.cljs``.
 
 ** State shape
+Defined in ``enthalpy.db/default-db`` under the ``:trainer`` key:
 #+BEGIN_SRC clojure
-(def state
-  (r/atom
-    {:level           1        ; 1–8
+{:trainer
+   {:level           1        ; 1–8
      :mode            :words   ; :words | :time
      :limit           15       ; word count or seconds depending on mode
      :words           []       ; current prompt word list
@@ -129,7 +134,7 @@ All trainer state lives in a single Reagent atom in ``trainer.cljs``.
      :allow-caps?     false    ; include capital letters in prompts
      :allow-punct?    false    ; include punctuation in prompts
      :backspace-req?  false    ; require backspace to correct errors
-     :emulate-qwerty? false})) ; translate physical US QWERTY keys to Enthium positions
+     :emulate-qwerty? false}} ; translate physical US QWERTY keys to Enthium positions
 #+END_SRC
 
 ** Level definitions
@@ -156,21 +161,25 @@ that set. Levels 7 and 8 are unrestricted; level 8 uses the sentence corpus
 instead of the word list.
 
 ** Trainer loop
-1. ``init-round!`` — pick N words from the filtered list, reset indices/input.
+1. ``:trainer/reset-round`` event — generates words via ``gen-words``, resets indices/input in ``app-db``.
 2. User types in ``#userInput`` (a plain ``<input>``).
-3. On each ``on-change``: compare current token against ``(nth words word-index)``.
-   - Trailing space = word submitted. If correct → increment hits, advance index.
-   - Wrong character → increment errors (optionally play error sound).
-4. On word-limit or time-limit reached → set ``:finished? true``, compute WPM.
-5. ``reset-round!`` resets state and calls ``init-round!``.
+3. On each keystroke:
+   - If it's the first key, dispatch ``:trainer/start-timer`` to begin the RAF loop.
+   - Dispatch ``:trainer/input-change`` with the new value.
+4. ``:trainer/input-change`` logic:
+   - Trailing space = word submission attempt. If correct → increment hits, advance index.
+   - If word limit reached (word mode) → dispatch ``:trainer/finish-round``.
+   - Otherwise → update ``:input`` and ``:input-error?``, increment ``:errors`` if mismatched.
+5. ``:trainer/tick`` event — dispatched by RequestAnimationFrame; updates ``:elapsed-ms``.
+6. If time limit reached (time mode) → dispatch ``:trainer/finish-round``.
 
 WPM formula (standard): ``(/ hits (/ elapsed-ms 60000))``.
 
 ** QWERTY emulation layer
 Implemented in ``src/enthalpy/emulation.cljs``. When ``:emulate-qwerty? true``
 the trainer intercepts every ``keydown`` event, translates the physical US QWERTY
-key to the Enthium v14 character at the same physical position, and drives
-``on-input-change!`` directly. The ``<input>`` value always shows Enthium
+key to the Enthium v14 character at the same physical position, and dispatches
+``:trainer/input-change`` directly. The ``<input>`` value always shows Enthium
 characters; QWERTY translation is transparent to the rest of the trainer.
 
 The toggle button is labelled **US KB** in the settings row. Toggling it does

@@ -164,15 +164,15 @@
 
 (defn check-trainer-state []
   (println (str "\n" bold "7. Trainer state shape" reset))
-  (let [f   (io/file "src/enthalpy/trainer.cljs")
-        ast (parse-file f)
-        ;; The state atom is (def state (r/atom {...})).
-        ;; extract-def gives us the (r/atom {...}) call form.
-        atom-form (extract-def ast 'state)
-        ;; The map is the first argument to r/atom.
-        state-map (when (seq? atom-form) (second atom-form))]
+  ;; after the re-frame refactor the state map lives in db.cljs
+  (let [f        (io/file "src/enthalpy/db.cljs")
+        ast      (parse-file f)
+        ;; default-db is defined as a map literal
+        db-form  (extract-def ast 'default-db)
+        ;; extract :trainer key from the map if possible
+        state-map (when (map? db-form) (get db-form :trainer))]
     (if-not (map? state-map)
-      (do (fail "trainer.cljs — could not extract state map from (def state (r/atom {...}))")
+      (do (fail "db.cljs — could not extract :trainer map from default-db")
           (swap! errors inc))
       (doseq [k required-trainer-keys]
         (assert-pass

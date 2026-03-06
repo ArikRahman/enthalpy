@@ -70,3 +70,5 @@ Some of the icons have been taken from Flaticon, which requires attribution. Bel
 | fa-keyboard     | [Flaticon](https://www.flaticon.com/free-icon/keyboard_4122844)                    |
 
 Icons not listed here are either from Material Icons, or created from scratch.
+
+<img width="1024" height="1024" alt="Gemini_Generated_Image_h7oi8vh7oi8vh7oi(1)" src="https://github.com/user-attachments/assets/5241e1aa-27b6-4d52-a873-b98a56a0e8b8" />

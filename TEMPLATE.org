@@ -1,0 +1,1 @@
+* replicable template for future clojure projects

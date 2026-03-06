@@ -1,11 +1,6 @@
 (ns enthalpy.router
   (:require [re-frame.core :as rf]))
 
-;; Single source of truth for the current page.
-;; Shape: {:page :index} | {:page :learn} | {:page :compare}
-;;        {:page :layout} | {:page :section :topic "learn"}
-(def current-route (rf/subscribe [:route]))
-
 (defn parse-hash
   "Convert a location.hash string (including leading #) into a route map."
   [hash]

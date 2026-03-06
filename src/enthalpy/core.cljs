@@ -13,7 +13,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn app []
-  (let [route @router/current-route]
+  (let [route @(rf/subscribe [:route])]
     (case (:page route)
       :index   [views/index-page]
       :about   [views/about-page]

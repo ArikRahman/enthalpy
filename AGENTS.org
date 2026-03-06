@@ -288,26 +288,102 @@ All colours and spacing use CSS custom properties in ``docs/css/style.css``.
 All day-to-day tasks are run via ``just``. Run ``just`` (no arguments) to list
 every available recipe.
 
-| Task                        | Command            |
-|-----------------------------+--------------------|
-| Install deps                | ``just install``   |
-| Dev server (hot-reload)     | ``just dev``       |
-| Open browser to :3000       | ``just open``      |
-| Production build            | ``just build``     |
-| Clean build cache           | ``just clean``     |
-| Clean + full rebuild        | ``just rebuild``   |
-| Stop background server      | ``just stop``      |
-| Force-kill shadow-cljs JVM  | ``just kill``      |
-| Per-file syntax check       | ``just check``     |
-| Full integrity test suite   | ``just test``      |
-| Syntax check + test suite   | ``just verify``    |
-| verify + build (pre-commit) | ``just ci``        |
+** Build & dev
+| Task                        | Command             |
+|-----------------------------+---------------------|
+| Install deps                | ``just install``    |
+| Dev server (hot-reload)     | ``just dev``        |
+| Open browser to :3000       | ``just open``       |
+| Production build            | ``just build``      |
+| Clean build cache           | ``just clean``      |
+| Clean + full rebuild        | ``just rebuild``    |
+| Stop background server      | ``just stop``       |
+| Force-kill shadow-cljs JVM  | ``just kill``       |
+| Per-file syntax check       | ``just check``      |
+| Full integrity test suite   | ``just test``       |
+| Syntax check + test suite   | ``just verify``     |
+| verify + build (pre-commit) | ``just ci``         |
 | Bundle size                 | ``just bundle-size``|
-| Source file list            | ``just files``     |
-| Lines of ClojureScript      | ``just loc``       |
-| Project status summary      | ``just status``    |
+| Source file list            | ``just files``      |
+| Lines of ClojureScript      | ``just loc``        |
+| Project status summary      | ``just status``     |
+
+** Version control
+| Task                               | Command                         |
+|------------------------------------+---------------------------------|
+| Working copy status                | ``just st``                     |
+| Recent commit log (last 10)        | ``just log``                    |
+| Diff of working copy changes       | ``just diff``                   |
+| Diff of a specific file            | ``just fdiff <path>``           |
+| Set message on current change      | ``just describe "<message>"``   |
+| Finalise change + new child        | ``just commit "<message>"``     |
+| Push main bookmark to origin       | ``just push``                   |
+| Fetch from origin                  | ``just fetch``                  |
+| Commit + push in one step          | ``just snap "<message>"``       |
+| ci + commit + push in one step     | ``just ship "<message>"``       |
+| Abandon current empty change       | ``just abandon``                |
 
 Dev server: http://localhost:3000
+
+* Version Control
+This repository uses **Jujutsu** (``jj``) in colocated mode — the ``.jj/``
+directory sits alongside ``.git/`` so both tools stay in sync. GitHub pushes
+use ``jj git push``. Never run raw ``git commit``; use the ``just`` recipes
+below instead.
+
+** Core concepts
+| jj concept    | git equivalent         | Notes                                              |
+|---------------+------------------------+----------------------------------------------------|
+| Change (@)    | Working tree + staging | Always exists; automatically tracks all edits      |
+| Bookmark      | Branch                 | ``main`` bookmark tracks the ``main`` git branch   |
+| ``jj commit`` | ``git commit``         | Seals @ with a message and opens a new empty child |
+| ``jj describe``| ``git commit --amend`` | Rewrites the message of an existing change         |
+| ``jj diff``   | ``git diff``           | Shows working copy changes                         |
+| ``jj log``    | ``git log``            | Visualises the change graph                        |
+
+** Typical workflow
+#+BEGIN_SRC sh
+# 1. Edit files — jj tracks all changes automatically, no staging needed.
+
+# 2. Check what changed
+just st          # jj status — files changed in @
+just diff        # full diff of working copy
+
+# 3. Commit and push
+just snap "Add feature X"
+# expands to:
+#   jj commit -m "Add feature X"   ← seals @ with message, opens new empty @
+#   jj bookmark set main --revision @-   ← advances main bookmark
+#   jj git push --bookmark main    ← pushes to GitHub
+
+# 4. Or run CI checks first, then commit + push
+just ship "Add feature X"
+# expands to: just ci && just snap "Add feature X"
+#+END_SRC
+
+** Bookmark / branch model
+- ``main`` is the only long-lived bookmark.
+- After ``jj commit``, ``@`` is a new empty child and ``@-`` holds the sealed
+  change. ``jj bookmark set main --revision @-`` moves ``main`` to that commit
+  so ``jj git push --bookmark main`` sends it to GitHub.
+- Do not create additional bookmarks unless you are deliberately working on a
+  feature branch.
+
+** Recovering from mistakes
+#+BEGIN_SRC sh
+jj diff                   # inspect before acting
+jj restore --from @- .    # discard all working copy changes (dangerous!)
+jj abandon @              # discard current empty change (just abandon recipe)
+jj undo                   # undo the last jj operation (safe, always reversible)
+jj op log                 # audit full operation history
+#+END_SRC
+
+** Colocated repo rules
+- ``.jj/`` is in ``.gitignore`` — it is never committed to git.
+- Never run ``git commit`` directly; the colocated mode keeps both in sync only
+  when you go through ``jj``.
+- ``jj git fetch`` + ``jj rebase -d main@origin`` is the pull/rebase workflow.
+- ``git status`` still works for quick inspection but defer to ``just st``.
 
 ** Syntax check
 Run ``just check`` from ``enthalpy/``. It invokes ``scripts/check-syntax.sh``
@@ -356,10 +432,11 @@ Before finalising any change:
 - No new ``style=`` attributes in hiccup (pre-existing ones are grandfathered)
 - No HTML entities in strings (use Unicode escapes)
 - Mobile layout checked at 768px
-- Run ``just ci`` (verify + build) immediately before committing
+- Use ``just ship "<message>"`` to run CI, commit, and push in one step
+- Never use raw ``git commit`` — always go through ``jj`` via the just recipes
 
 * Maintenance
-Last updated: 2026-03-05 (emulation layer, justfile, test suite)
+Last updated: 2026-03-05 (emulation layer, justfile, test suite, jujutsu VCS)
 Maintained by: Arik Rahman + AI agents
 
 - Anything like testing or way to fix runtime fixes via commands should be documented in APPENDIX.org
@@ -401,6 +478,8 @@ Documentation is under manus folder. The task should be under its own subfolder 
 - Use ``just`` for all tasks. Run ``just`` to see what's available.
 - Use ``bun`` only for raw package operations. Never use ``npm``, ``npx``, or
   ad hoc package-manager substitutions.
+- Use ``jj`` (via ``just`` recipes) for all version control. Never run raw
+  ``git commit``, ``git add``, or ``git push`` directly.
 - Never hand-edit ``docs/js/``.
 - Never add new inline ``style=`` attributes in hiccup. Use CSS classes only.
 - Prefer extending existing Reagent atoms, page components, and CSS classes over

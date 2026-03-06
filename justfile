@@ -90,3 +90,61 @@ status:
     @echo ""
     @echo "── shadow-cljs cache ─────────────────────────────────────────────"
     @ls .shadow-cljs/ 2>/dev/null && echo "  (cache present)" || echo "  (no cache)"
+
+# ── Version control (jujutsu) ─────────────────────────────────────────────────
+
+# Show working copy status
+st:
+    jj status
+
+# Show recent commit log (last 10 changes)
+log:
+    jj log --limit 10
+
+# Show diff of all working copy changes
+diff:
+    jj diff
+
+# Show diff for a specific file — usage: just fdiff src/enthalpy/trainer.cljs
+fdiff file:
+    jj diff --name-only -- "{{file}}" && jj diff -- "{{file}}"
+
+# Set the description (commit message) of the current working copy change
+# Usage: just describe "what I changed"
+describe message:
+    jj describe -m "{{message}}"
+
+# Finalise the current change and open a new empty child change.
+# Advances the main bookmark to the committed change.
+# Usage: just commit "what I changed"
+commit message:
+    jj commit -m "{{message}}"
+    jj bookmark set main --revision @-
+
+# Push the main bookmark to origin
+push:
+    jj git push --bookmark main
+
+# Fetch latest changes from origin
+fetch:
+    jj git fetch
+    jj log --limit 5
+
+# One-step: commit, advance bookmark, and push to origin.
+# Usage: just snap "what I changed"
+snap message:
+    jj commit -m "{{message}}"
+    jj bookmark set main --revision @-
+    jj git push --bookmark main
+
+# One-step: run ci checks, commit, advance bookmark, push.
+# Usage: just ship "what I changed"
+ship message: ci
+    jj commit -m "{{message}}"
+    jj bookmark set main --revision @-
+    jj git push --bookmark main
+
+# Abandon the current (empty) working copy change and move @ to parent
+# Useful if you started a new change by mistake before you were ready
+abandon:
+    jj abandon @

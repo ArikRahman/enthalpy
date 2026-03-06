@@ -1,3 +1,6 @@
+# Jujutsu VCS metadata
+.jj/
+
 .clj-kondo/
 .lsp/
 

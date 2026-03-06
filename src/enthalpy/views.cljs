@@ -69,7 +69,7 @@
   [:footer.site-footer
    [:div.site-footer__inner
     [:p.site-footer__brand
-     "Enthium v14 \u2014 by "
+     "Enthium v14 \u2026 by "
      [:strong
       [:a {:href "https://github.com/sunaku" :target "_blank"} "Suraj N. Kurapati"]]
      ". Documentation by Arik Rahman. Licensed ISC."]

@@ -13,6 +13,9 @@
     (or (= hash "") (= hash "#") (= hash "#/"))
     {:page :index}
 
+    (= hash "#/about")
+    {:page :about}
+
     (= hash "#/learn")
     {:page :learn}
 
@@ -35,6 +38,9 @@
 
 (defn navigate-to-index! []
   (set! (.-hash js/location) "/"))
+
+(defn navigate-to-about! []
+  (set! (.-hash js/location) "/about"))
 
 (defn navigate-to-learn! []
   (set! (.-hash js/location) "/learn"))

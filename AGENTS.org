@@ -307,3 +307,93 @@ Before finalising any change:
 * Maintenance
 Last updated: 2026-03-05
 Maintained by: Arik Rahman + AI agents
+
+- Anything like testing or way to fix runtime fixes via commands should be documented in APPENDIX.org
+- Style changes should be documented in STYLE.org
+
+
+AI agents working in this repository must follow a Manus-style execution loop:
+plan -> edit -> verify -> observe -> update plan. Manus describes agent work as
+an iterative cycle where the model analyzes the current state, selects one
+action, executes it, observes the result, and repeats until the task is done
+[page:1].
+
+** Required workflow
+Expected files is deliverable.md, notes.md, and taskplan.md
+Documentation is under manus folder. The task should be under its own subfolder named after the task.
+
+1. Restate the task as a short concrete plan before making edits.
+2. Identify the minimum file set to touch. Prefer existing files over adding new
+   ones.
+3. Make one coherent batch of edits for a single goal.
+4. Verify immediately after editing:
+   - Run the syntax check across all ``.cljs`` files.
+   - Run ``bun run build``.
+   - If UI behaviour changed, run ``bun run dev`` and test the relevant route.
+5. Record what changed, what was verified, and any remaining issues before
+   starting another batch.
+
+
+** Working memory
+- Keep a short live checklist in the task notes or commit message draft.
+- For multi-step work, maintain a ``todo`` list and update it after each verified
+  step. Manus uses repeated todo recitation to keep long tasks aligned with the
+  original goal, reducing drift during multi-step execution [page:1].
+- Do not rely on memory alone for long edits. Use the file tree, route table,
+  and section registry in this document as the source of truth.
+
+** Repo-specific execution rules
+- Use ``bun`` only. Never use ``npm``, ``npx``, or ad hoc package-manager
+  substitutions.
+- Never hand-edit ``docs/js/``.
+- Never add inline ``style=`` attributes in hiccup.
+- Prefer extending existing Reagent atoms, page components, and CSS classes over
+  introducing new abstractions unless the task clearly requires it.
+- Keep changes append-only in spirit: avoid unnecessary churn, renames, or broad
+  rewrites when a focused patch will do. Manus emphasizes stable context and
+  append-only state to preserve reliability across iterative work [page:1].
+
+** Failure handling
+- Do not hide failed attempts. If a command, parse, or build step fails, inspect
+  the actual error and fix the cause.
+- Preserve useful error information in notes or task output until the issue is
+  resolved. Manus explicitly argues that keeping failed actions and their
+  observations visible improves recovery in later steps [page:1].
+
+* Verified Spec-Driven Development (VSDD)
+
+Use VSDD for all non-trivial changes in Enthalpy: the specification is updated
+first, implementation follows, and verification decides whether the work is
+done. In this repository, ``AGENTS.org`` is part of the operative spec, not just
+a README [web:6].
+
+** VSDD process for this repo
+1. Identify the spec surface affected by the task.
+   - Routing change -> update the Routes section.
+   - Trainer behaviour change -> update Typing Trainer Architecture or state
+     shape.
+   - New doc section type -> update Documentation Sections or Hiccup Authoring
+     Reference.
+   - Styling convention change -> update Styling rules or CSS token guidance.
+2. Edit the spec first when behaviour, structure, or workflow changes.
+3. Implement only what the updated spec requires.
+4. Verify against the spec, not against intuition:
+   - Syntax check prints OK for all ``.cljs`` files.
+   - ``bun run build`` completes with 0 warnings.
+   - Affected route or feature behaves as described in the spec.
+   - Mobile layout still works at 768px when relevant.
+5. If implementation and spec disagree, resolve the mismatch explicitly. Do not
+   leave silent drift between code and ``AGENTS.org``.
+
+** Definition of done under VSDD
+A change is done only when all of the following are true:
+- The relevant spec in ``AGENTS.org`` matches the shipped behaviour.
+- The code compiles and the required verification steps pass.
+- No forbidden patterns were introduced, including inline styles, hand-edited
+  compiled assets, HTML entities in strings, or non-Bun workflows.
+- The change is minimal, coherent, and reversible.
+
+** Practical rule
+If you are about to change behaviour and have not updated the corresponding
+specification section, you are probably moving too fast. Stop, patch the spec,
+then continue with implementation.

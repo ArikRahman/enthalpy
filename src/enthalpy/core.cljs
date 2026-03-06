@@ -13,6 +13,7 @@
   (let [route @router/current-route]
     (case (:page route)
       :index   [views/index-page]
+      :about   [views/about-page]
       :learn   [views/learn-page]
       :compare [views/compare-page]
       :layout  [layout/page]

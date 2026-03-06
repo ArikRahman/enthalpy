@@ -1,7 +1,8 @@
 (ns enthalpy.views
-  (:require [enthalpy.router :as router]
-            [enthalpy.data   :as data]
-            [enthalpy.layout :as layout]))
+  (:require [enthalpy.router  :as router]
+            [enthalpy.data    :as data]
+            [enthalpy.layout  :as layout]
+            [enthalpy.trainer :as trainer]))
 
 ;; ---------------------------------------------------------------------------
 ;; Stat card data — edit this vector to add/remove/change home-page stat cards
@@ -47,7 +48,10 @@
     [:ul.site-nav__links
      [:li [:a {:href "#/"
                :on-click #(do (.preventDefault %) (router/navigate-to-index!))}
-           "Home"]]
+           "Trainer"]]
+     [:li [:a {:href "#/about"
+               :on-click #(do (.preventDefault %) (router/navigate-to-about!))}
+           "About"]]
      [:li [:a {:href "#/layout"
                :on-click #(do (.preventDefault %) (router/navigate-to-layout!))}
            "Layout"]]
@@ -158,10 +162,20 @@
        ^{:key (:id s)} [section-card s])]]])
 
 ;; ---------------------------------------------------------------------------
-;; Index page
+;; Index page — Typing trainer as the primary feature
 ;; ---------------------------------------------------------------------------
 
 (defn index-page []
+  [:<>
+   [site-nav]
+   [trainer/trainer-page]
+   [site-footer]])
+
+;; ---------------------------------------------------------------------------
+;; About page — the old home page content (layout preview + stats + sections)
+;; ---------------------------------------------------------------------------
+
+(defn about-page []
   [:<>
    [site-nav]
    [hero]

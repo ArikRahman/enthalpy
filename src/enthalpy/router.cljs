@@ -1,0 +1,60 @@
+(ns enthalpy.router
+  (:require [reagent.core :as r]))
+
+;; Single source of truth for the current page.
+;; Shape: {:page :index} | {:page :learn} | {:page :compare}
+;;        {:page :layout} | {:page :section :topic "learn"}
+(def current-route (r/atom {:page :index}))
+
+(defn parse-hash
+  "Convert a location.hash string (including leading #) into a route map."
+  [hash]
+  (cond
+    (or (= hash "") (= hash "#") (= hash "#/"))
+    {:page :index}
+
+    (= hash "#/learn")
+    {:page :learn}
+
+    (= hash "#/compare")
+    {:page :compare}
+
+    (= hash "#/layout")
+    {:page :layout}
+
+    (re-find #"^#/sections/(.+)$" hash)
+    (let [[_ topic] (re-find #"^#/sections/(.+)$" hash)]
+      {:page :section :topic topic})
+
+    :else
+    {:page :index}))
+
+;; ---------------------------------------------------------------------------
+;; Navigation helpers — call these instead of manipulating location directly.
+;; ---------------------------------------------------------------------------
+
+(defn navigate-to-index! []
+  (set! (.-hash js/location) "/"))
+
+(defn navigate-to-learn! []
+  (set! (.-hash js/location) "/learn"))
+
+(defn navigate-to-compare! []
+  (set! (.-hash js/location) "/compare"))
+
+(defn navigate-to-layout! []
+  (set! (.-hash js/location) "/layout"))
+
+(defn navigate-to-section! [topic]
+  (set! (.-hash js/location) (str "/sections/" topic)))
+
+;; ---------------------------------------------------------------------------
+;; Initialisation — call once from core/init
+;; ---------------------------------------------------------------------------
+
+(defn init!
+  "Attach hashchange listener and sync current-route with the current URL."
+  []
+  (let [sync! #(reset! current-route (parse-hash (.-hash js/location)))]
+    (.addEventListener js/window "hashchange" sync!)
+    (sync!)))

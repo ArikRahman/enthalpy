@@ -1,0 +1,309 @@
+#+TITLE: AGENTS.org
+#+AUTHOR: Arik Rahman + AI agents
+#+DATE: 2026-03-05
+#+STARTUP: showall
+
+* Purpose
+Instructions for AI agents working on this codebase. Read this before touching anything.
+
+* Project Overview
+Enthalpy is a ClojureScript port and rework of the ColemakCamp typing trainer
+(https://github.com/ColemakCamp/colemakcamp.github.io), reoriented around the
+Enthium v14 keyboard layout. The primary feature is an interactive typing trainer
+with progressive level unlocking, a live cheatsheet keyboard, and WPM/accuracy
+scoring. Secondary features are supplementary documentation pages (rationale,
+stats, comparisons, learning guide) reachable via hash routes.
+
+The original ColemakCamp source (JavaScript) lives in the repository root and
+serves as the reference implementation for UI behaviour and word-list logic.
+The ClojureScript rewrite lives in ``src/`` and compiles to ``docs/``.
+
+** What ColemakCamp provides (reference only — do not ship as-is)
+- Typing trainer loop: prompt words → capture input → score hits/errors → next
+- Progressive level system: each level unlocks more letters (lvl1–lvl8)
+- Cheatsheet keyboard: visual key map shown alongside the typing area
+- Settings: capital letters, punctuation, backspace correction, time/word limits,
+  sound on keystroke/error
+- Layout selector: Colemak, Colemak-DH, Tarmak, QWERTY, custom, etc.
+- Word list: filtered by the letters available at the current level
+
+** What Enthalpy changes
+- Single layout: Enthium v14 only. The layout selector is removed.
+- Level letter sets: redefined in Enthium frequency order (highest-freq letters
+  first), not Colemak order.
+- Branding, copy, and colours: Enthium/Enthalpy identity.
+- Stack: ClojureScript + Reagent instead of vanilla JS. All state in Reagent atoms.
+- Supplementary docs: rationale, stats, compare, and learning-guide pages added
+  as hash routes alongside the trainer.
+
+* Technology Stack
+| Layer            | Technology                                    |
+|------------------+-----------------------------------------------|
+| Language         | ClojureScript                                 |
+| UI               | Reagent 1.2.0                                 |
+| Build            | shadow-cljs                                   |
+| Package Manager  | Bun — the ONLY runtime. Never use npx or npm. |
+| Routing          | Custom hash-based (no extra deps)             |
+| Styling          | Plain CSS (custom dark theme)                 |
+| Content Authoring| Doom Emacs + Org-mode                         |
+
+* File Structure
+#+BEGIN_EXAMPLE
+enthalpy/
+├── src/
+│   └── enthalpy/
+│       ├── core.cljs          ; Entry point — mounts Reagent app
+│       ├── router.cljs        ; Hash-based router, current-route atom
+│       ├── views.cljs         ; Page-level components (trainer, docs pages)
+│       ├── trainer.cljs       ; Typing trainer state machine + components
+│       ├── words.cljs         ; Word list data + level-filtered word picker
+│       ├── data.cljs          ; Documentation section registry
+│       ├── layout.cljs        ; Enthium key data + cheatsheet + comparison table
+│       └── sections/
+│           └── s_TOPIC.cljs   ; One file per doc section
+├── docs/                      ; Static site root — served as-is by GitHub Pages
+│   ├── index.html             ; Minimal HTML shell — loads JS + CSS only
+│   ├── css/
+│   │   └── style.css          ; Single unified stylesheet
+│   └── js/                    ; Compiled output — DO NOT hand-edit
+├── .lsp/
+│   └── config.edn             ; clojure-lsp: use bunx, not npx
+├── shadow-cljs.edn            ; Build config
+├── package.json               ; Bun dependencies
+└── AGENTS.org                 ; This file
+#+END_EXAMPLE
+
+The legacy ColemakCamp files (``app/``, ``fonts/``, ``lib/``, ``scripts/``,
+``sounds/``, ``styles/``, root ``index.html``) remain in the repo as reference
+but are not served. GitHub Pages is configured to serve from ``docs/``.
+
+* Routes
+| Hash fragment    | Page component               | Description                      |
+|------------------+------------------------------+----------------------------------|
+| #/ or empty      | ``views/trainer-page``       | Typing trainer (primary feature) |
+| #/layout         | ``layout/page``              | Enthium key map + stats          |
+| #/learn          | ``views/learn-page``         | All documentation sections       |
+| #/compare        | ``views/compare-page``       | Layout comparison table          |
+| #/sections/TOPIC | ``views/section-page``       | Individual section               |
+
+Routing is handled in ``router.cljs`` via a single Reagent atom ``current-route``.
+``core.cljs`` dispatches on ``(:page route)`` with ``case``.
+
+To add a new route:
+1. Add the pattern + map to ``parse-hash`` in ``router.cljs``.
+2. Add a ``navigate-to-X!`` helper in ``router.cljs``.
+3. Add the ``case`` branch in ``core.cljs``.
+4. Add the page component in ``views.cljs``.
+
+* Typing Trainer Architecture
+All trainer state lives in a single Reagent atom in ``trainer.cljs``.
+
+** State shape
+#+BEGIN_SRC clojure
+(def state
+  (r/atom
+    {:level          1         ; 1–8
+     :mode           :words    ; :words | :sentences | :time
+     :limit          50        ; word count or seconds depending on mode
+     :words          []        ; current prompt word list
+     :word-index     0         ; index into :words of the active word
+     :input          ""        ; current text-field value
+     :hits           0         ; correctly completed words
+     :errors         0         ; incorrect keystrokes
+     :started?       false     ; true once first keystroke received
+     :finished?      false     ; true when limit reached
+     :start-ms       nil       ; js/Date.now() at first keystroke
+     :elapsed-ms     0         ; updated by RAF loop while running
+     :show-cheat?    true      ; show cheatsheet keyboard
+     :sound-stroke?  false     ; play sound on keystroke
+     :sound-error?   false     ; play sound on error
+     :allow-caps?    false     ; include capital letters in prompts
+     :allow-punct?   false     ; include punctuation in prompts
+     :backspace-req? false}))  ; require backspace to correct errors
+#+END_SRC
+
+** Level definitions
+Defined as a vector of maps in ``trainer.cljs``. Each level adds letters to the
+unlocked set. Letter order follows Enthium v14 home-row frequency (highest first),
+not Colemak order.
+
+#+BEGIN_SRC clojure
+(def levels
+  [{:id 1 :label "Level 1" :letters #{"h" "t" "n" "s" "e" "a" "i" "r"}}
+   {:id 2 :label "Level 2" :letters #{"o" "c" "l" "d"}}
+   {:id 3 :label "Level 3" :letters #{"u" "y" "m" "p"}}
+   {:id 4 :label "Level 4" :letters #{"b" "w" "f" "g"}}
+   {:id 5 :label "Level 5" :letters #{"k" "v" "j" "x"}}
+   {:id 6 :label "Level 6" :letters #{"'" "," "." ";"}}
+   {:id 7 :label "Level 7" :letters nil}   ; all words
+   {:id 8 :label "Level 8" :sentences? true}]) ; full sentences
+#+END_SRC
+
+Each level's available set is the union of all letter sets up to and including
+that level. ``words.cljs`` filters the word list to only words constructable
+from the current available-letters set.
+
+** Trainer loop
+1. ``init-round!`` — pick N words from the filtered list, reset indices/input.
+2. User types in ``#userInput`` (a plain ``<input>``).
+3. On each ``on-change``: compare current token against ``(nth words word-index)``.
+   - Trailing space = word submitted. If correct → increment hits, advance index.
+   - Wrong character → increment errors (optionally play error sound).
+4. On word-limit or time-limit reached → set ``:finished? true``, compute WPM.
+5. ``reset-round!`` resets state and calls ``init-round!``.
+
+WPM formula (standard): ``(/ hits (/ elapsed-ms 60000))``.
+
+** Cheatsheet keyboard
+Rendered by ``layout/keyboard-diagram`` (already implemented). Shown below the
+typing area when ``:show-cheat? true``. Toggled by a button in the toolbar.
+Highlights the current target key based on the next character to type (future
+enhancement — not required for v1).
+
+* Documentation Sections
+Secondary content. Each section lives in ``src/enthalpy/sections/s_TOPIC.cljs``.
+
+** Section map shape
+#+BEGIN_SRC clojure
+(ns enthalpy.sections.s-learn)
+
+(def section
+  {:id       "learn"
+   :featured true              ; show on learn-page featured row
+   :title    "Learning Enthium v14"
+   :subtitle "A structured onramp for switching from QWERTY or Colemak"
+   :excerpt  "2-3 sentence blurb shown on section list card."
+   :content
+   [[:p "Opening paragraph..."]
+    [:h2 "Section Header"]
+    [:p "Body text."]]})
+#+END_SRC
+
+** Adding a new section
+1. Create ``src/enthalpy/sections/s_TOPIC.cljs`` following the shape above.
+2. In ``src/enthalpy/data.cljs``:
+   - Add require: ``[enthalpy.sections.s-TOPIC :as s-TOPIC]``
+   - Add ``s-TOPIC/section`` to the registry vector.
+3. Run the syntax check — all files must print OK.
+4. Run ``bun run dev`` and verify the section appears at ``#/learn``.
+
+** Section ordering
+``data/all-sections`` sorts by ``:id`` alphabetically.
+Registry order does not matter.
+
+* Hiccup Authoring Reference
+The ``:content`` value is a vector of Reagent hiccup vectors rendered inside
+``<article class="section-body">``.
+
+** Available elements
+| Hiccup                              | Renders as                        |
+|-------------------------------------+-----------------------------------|
+| ``[:p "..."]``                      | Body paragraph                    |
+| ``[:h2 "..."]``                     | Section header                    |
+| ``[:h3 "..."]``                     | Subsection header                 |
+| ``[:ul [:li "..."] ...]``           | Bulleted list                     |
+| ``[:ol [:li "..."] ...]``           | Numbered list                     |
+| ``[:code "..."]``                   | Inline monospace (key names)      |
+| ``[:strong "..."]``                 | Bold                              |
+| ``[:em "..."]``                     | Italic                            |
+| ``[:div.highlight-box [:p ...]]``   | Left-border insight callout       |
+| ``[:div.key-box [:p ...]]``         | Left-border key sequence callout  |
+
+** Special characters — never use HTML entities
+| Character | ClojureScript literal |
+|-----------+-----------------------|
+| em dash   | ``\u2014``            |
+| middot    | ``\u00B7``            |
+| ×         | ``\u00D7``            |
+| copyright | ``\u00A9``            |
+| "         | ``\"`` (escaped)      |
+
+* CSS Design Tokens
+All colours and spacing use CSS custom properties in ``docs/css/style.css``.
+
+#+BEGIN_EXAMPLE
+--bg:          #1c1c1e   /* page background          */
+--bg-2:        #25262b   /* hover / secondary bg     */
+--bg-card:     #2c2e33   /* card backgrounds         */
+--fg:          #f0ebe3   /* primary text             */
+--fg-muted:    #a6a7ab   /* secondary text           */
+--fg-subtle:   #5c5f66   /* de-emphasised text       */
+--accent:      #c9a96e   /* gold accent              */
+--border:      #373a40   /* default border           */
+--border-mid:  #414550   /* stronger border          */
+#+END_EXAMPLE
+
+** Finger colours (keyboard diagram)
+#+BEGIN_EXAMPLE
+--f-lp:  #8b7fd4   /* left pinky  — violet   */
+--f-lr:  #5fa86e   /* left ring   — sage     */
+--f-lm:  #c9a96e   /* left middle — gold     */
+--f-li:  #c86a5a   /* left index  — coral    */
+--f-ri:  #5a9ec8   /* right index — sky      */
+--f-rm:  #c8855a   /* right middle— amber    */
+--f-rr:  #4fbcaa   /* right ring  — teal     */
+--f-rp:  #a07cbc   /* right pinky — lavender */
+--f-th:  #7a8a9a   /* thumb       — slate    */
+#+END_EXAMPLE
+
+** Styling rules
+- Never add ``style=`` attributes to hiccup. Use CSS classes only.
+- Never create per-section or per-page CSS overrides.
+- Never hand-edit ``docs/js/``.
+- New components: add CSS class to ``docs/css/style.css`` and add a mobile
+  breakpoint under ``@media (max-width: 768px)``.
+
+* Commands
+| Task                    | Command                  |
+|-------------------------+--------------------------|
+| Install deps            | ``bun install``          |
+| Dev server (hot-reload) | ``bun run dev``          |
+| Production build        | ``bun run build``        |
+| Stop background server  | ``bun run stop``         |
+| Syntax check all .cljs  | see below                |
+
+Dev server: http://localhost:3000
+
+** Syntax check
+Run from ``enthalpy/`` after every edit. All files must print OK.
+
+#+BEGIN_SRC sh
+clj -M -e "(doseq [f (file-seq (clojure.java.io/file \"src\"))] (when (.endsWith (str f) \".cljs\") (try (read-string (str \"(do \" (slurp f) \")\")) (println \"OK:\" f) (catch Exception e (println \"ERR:\" f \"-\" (.getMessage e))))))"
+#+END_SRC
+
+** Stale server
+``shadow-cljs release`` leaves a background JVM server running. If ``bun run dev``
+prints ``already started``, kill it:
+
+#+BEGIN_SRC sh
+kill $(pgrep -f "shadow.cljs.devtools.cli")
+#+END_SRC
+
+* Key Files Quick Reference
+| File                               | Purpose                                     |
+|------------------------------------+---------------------------------------------|
+| src/enthalpy/trainer.cljs          | ✏️ Typing trainer state + components        |
+| src/enthalpy/words.cljs            | ✏️ Word list + level-filtered picker        |
+| src/enthalpy/layout.cljs           | ✏️ Key data, cheatsheet, comparison table   |
+| src/enthalpy/views.cljs            | ✏️ Page components                          |
+| src/enthalpy/router.cljs           | ✏️ Routes + navigate helpers                |
+| src/enthalpy/data.cljs             | ✏️ Documentation section registry           |
+| src/enthalpy/sections/s_TOPIC.cljs | ✏️ Add/edit doc section content             |
+| docs/css/style.css                 | ✏️ All styling                              |
+| docs/index.html                    | 🚫 Minimal shell — do not edit              |
+| docs/js/                           | 🚫 Compiled output — do not edit            |
+| app/ fonts/ lib/ scripts/ sounds/  | 📖 ColemakCamp reference — do not ship      |
+
+* Quality Checklist
+Before finalising any change:
+- Syntax check passes — all files print OK
+- ``bun run build`` completes with 0 warnings
+- Trainer: tested in browser — typing loop works, level switch works, reset works
+- Doc sections: ``:id`` unique, registered in ``data.cljs``, excerpt 2–3 sentences
+- No ``style=`` attributes in hiccup
+- No HTML entities in strings (use Unicode escapes)
+- Mobile layout checked at 768px
+
+* Maintenance
+Last updated: 2026-03-05
+Maintained by: Arik Rahman + AI agents

@@ -57,6 +57,7 @@ enthalpy/
 │       ├── views.cljs         ; Page-level components (trainer, docs pages)
 │       ├── trainer.cljs       ; Typing trainer state machine + components
 │       ├── words.cljs         ; Word list data + level-filtered word picker
+│       ├── emulation.cljs     ; US QWERTY → Enthium physical-key map + helpers
 │       ├── data.cljs          ; Documentation section registry
 │       ├── layout.cljs        ; Enthium key data + cheatsheet + comparison table
 │       └── sections/
@@ -66,6 +67,11 @@ enthalpy/
 │   ├── css/
 │   │   └── style.css          ; Single unified stylesheet
 │   └── js/                    ; Compiled output — DO NOT hand-edit
+├── scripts/
+│   ├── test.clj               ; Full integrity test suite (clj -M scripts/test.clj)
+│   ├── check-syntax.sh        ; Per-file .cljs syntax check (called by just check)
+│   └── …                      ; ColemakCamp JS reference files — do not ship
+├── justfile                   ; Task runner — run `just` to list all recipes
 ├── .lsp/
 │   └── config.edn             ; clojure-lsp: use bunx, not npx
 ├── shadow-cljs.edn            ; Build config
@@ -81,6 +87,7 @@ but are not served. GitHub Pages is configured to serve from ``docs/``.
 | Hash fragment    | Page component               | Description                      |
 |------------------+------------------------------+----------------------------------|
 | #/ or empty      | ``views/trainer-page``       | Typing trainer (primary feature) |
+| #/about          | ``views/about-page``         | About / original home content    |
 | #/layout         | ``layout/page``              | Enthium key map + stats          |
 | #/learn          | ``views/learn-page``         | All documentation sections       |
 | #/compare        | ``views/compare-page``       | Layout comparison table          |
@@ -102,46 +109,51 @@ All trainer state lives in a single Reagent atom in ``trainer.cljs``.
 #+BEGIN_SRC clojure
 (def state
   (r/atom
-    {:level          1         ; 1–8
-     :mode           :words    ; :words | :sentences | :time
-     :limit          50        ; word count or seconds depending on mode
-     :words          []        ; current prompt word list
-     :word-index     0         ; index into :words of the active word
-     :input          ""        ; current text-field value
-     :hits           0         ; correctly completed words
-     :errors         0         ; incorrect keystrokes
-     :started?       false     ; true once first keystroke received
-     :finished?      false     ; true when limit reached
-     :start-ms       nil       ; js/Date.now() at first keystroke
-     :elapsed-ms     0         ; updated by RAF loop while running
-     :show-cheat?    true      ; show cheatsheet keyboard
-     :sound-stroke?  false     ; play sound on keystroke
-     :sound-error?   false     ; play sound on error
-     :allow-caps?    false     ; include capital letters in prompts
-     :allow-punct?   false     ; include punctuation in prompts
-     :backspace-req? false}))  ; require backspace to correct errors
+    {:level           1        ; 1–8
+     :mode            :words   ; :words | :time
+     :limit           15       ; word count or seconds depending on mode
+     :words           []       ; current prompt word list
+     :word-index      0        ; index into :words of the active word
+     :input           ""       ; current text-field value
+     :input-error?    false    ; true when current input doesn't match target prefix
+     :hits            0        ; correctly completed words
+     :errors          0        ; incorrect keystrokes
+     :started?        false    ; true once first keystroke received
+     :finished?       false    ; true when limit reached
+     :start-ms        nil      ; js/Date.now() at first keystroke
+     :elapsed-ms      0        ; updated by RAF loop while running
+     :raf-id          nil      ; requestAnimationFrame handle for the timer
+     :show-cheat?     true     ; show cheatsheet keyboard
+     :sound-stroke?   false    ; play sound on keystroke (wired to UI toggle; audio NYI)
+     :sound-error?    false    ; play sound on error (wired to UI toggle; audio NYI)
+     :allow-caps?     false    ; include capital letters in prompts
+     :allow-punct?    false    ; include punctuation in prompts
+     :backspace-req?  false    ; require backspace to correct errors
+     :emulate-qwerty? false})) ; translate physical US QWERTY keys to Enthium positions
 #+END_SRC
 
 ** Level definitions
-Defined as a vector of maps in ``trainer.cljs``. Each level adds letters to the
-unlocked set. Letter order follows Enthium v14 home-row frequency (highest first),
-not Colemak order.
+Defined in ``words.cljs`` as ``level-new-letters`` — a map from level number to
+the set of letters newly introduced at that level. Letter order follows Enthium
+v14 home-row frequency (highest first), not Colemak order.
 
 #+BEGIN_SRC clojure
-(def levels
-  [{:id 1 :label "Level 1" :letters #{"h" "t" "n" "s" "e" "a" "i" "r"}}
-   {:id 2 :label "Level 2" :letters #{"o" "c" "l" "d"}}
-   {:id 3 :label "Level 3" :letters #{"u" "y" "m" "p"}}
-   {:id 4 :label "Level 4" :letters #{"b" "w" "f" "g"}}
-   {:id 5 :label "Level 5" :letters #{"k" "v" "j" "x"}}
-   {:id 6 :label "Level 6" :letters #{"'" "," "." ";"}}
-   {:id 7 :label "Level 7" :letters nil}   ; all words
-   {:id 8 :label "Level 8" :sentences? true}]) ; full sentences
+(def level-new-letters
+  {1 #{"h" "t" "n" "s" "e" "a" "i" "r"}
+   2 #{"o" "c" "l" "d"}
+   3 #{"u" "y" "m" "p"}
+   4 #{"b" "w" "f" "g"}
+   5 #{"k" "v" "j" "x"}
+   6 #{"'" "," "." ";"}
+   7 nil   ; all words — no restriction
+   8 nil}) ; sentence mode
 #+END_SRC
 
-Each level's available set is the union of all letter sets up to and including
-that level. ``words.cljs`` filters the word list to only words constructable
-from the current available-letters set.
+Each level's available set is the cumulative union of all letter sets from
+level 1 up to and including the current level, computed by ``level-letters`` in
+``words.cljs``. The word list is filtered to only words constructable from
+that set. Levels 7 and 8 are unrestricted; level 8 uses the sentence corpus
+instead of the word list.
 
 ** Trainer loop
 1. ``init-round!`` — pick N words from the filtered list, reset indices/input.
@@ -153,6 +165,25 @@ from the current available-letters set.
 5. ``reset-round!`` resets state and calls ``init-round!``.
 
 WPM formula (standard): ``(/ hits (/ elapsed-ms 60000))``.
+
+** QWERTY emulation layer
+Implemented in ``src/enthalpy/emulation.cljs``. When ``:emulate-qwerty? true``
+the trainer intercepts every ``keydown`` event, translates the physical US QWERTY
+key to the Enthium v14 character at the same physical position, and drives
+``on-input-change!`` directly. The ``<input>`` value always shows Enthium
+characters; QWERTY translation is transparent to the rest of the trainer.
+
+The toggle button is labelled **US KB** in the settings row. Toggling it does
+not reset the current round.
+
+Key API in ``emulation.cljs``:
+- ``qwerty->enthium`` — map of 31 physical QWERTY keys → Enthium characters
+- ``enthium->qwerty`` — reverse map (for future hint rendering)
+- ``translate-key [ch allow-caps?]`` — translate a single character
+- ``translate-string [s allow-caps?]`` — translate a whole string
+
+CapsLock is excluded from the map because browsers cannot reliably intercept it
+at the application level.
 
 ** Cheatsheet keyboard
 Rendered by ``layout/keyboard-diagram`` (already implemented). Shown below the
@@ -254,58 +285,81 @@ All colours and spacing use CSS custom properties in ``docs/css/style.css``.
   breakpoint under ``@media (max-width: 768px)``.
 
 * Commands
-| Task                    | Command                  |
-|-------------------------+--------------------------|
-| Install deps            | ``bun install``          |
-| Dev server (hot-reload) | ``bun run dev``          |
-| Production build        | ``bun run build``        |
-| Stop background server  | ``bun run stop``         |
-| Syntax check all .cljs  | see below                |
+All day-to-day tasks are run via ``just``. Run ``just`` (no arguments) to list
+every available recipe.
+
+| Task                        | Command            |
+|-----------------------------+--------------------|
+| Install deps                | ``just install``   |
+| Dev server (hot-reload)     | ``just dev``       |
+| Open browser to :3000       | ``just open``      |
+| Production build            | ``just build``     |
+| Clean build cache           | ``just clean``     |
+| Clean + full rebuild        | ``just rebuild``   |
+| Stop background server      | ``just stop``      |
+| Force-kill shadow-cljs JVM  | ``just kill``      |
+| Per-file syntax check       | ``just check``     |
+| Full integrity test suite   | ``just test``      |
+| Syntax check + test suite   | ``just verify``    |
+| verify + build (pre-commit) | ``just ci``        |
+| Bundle size                 | ``just bundle-size``|
+| Source file list            | ``just files``     |
+| Lines of ClojureScript      | ``just loc``       |
+| Project status summary      | ``just status``    |
 
 Dev server: http://localhost:3000
 
 ** Syntax check
-Run from ``enthalpy/`` after every edit. All files must print OK.
+Run ``just check`` from ``enthalpy/``. It invokes ``scripts/check-syntax.sh``
+which parses every ``.cljs`` file individually and reports OK / ERR per file.
+All files must print OK before committing.
 
-#+BEGIN_SRC sh
-clj -M -e "(doseq [f (file-seq (clojure.java.io/file \"src\"))] (when (.endsWith (str f) \".cljs\") (try (read-string (str \"(do \" (slurp f) \")\")) (println \"OK:\" f) (catch Exception e (println \"ERR:\" f \"-\" (.getMessage e))))))"
-#+END_SRC
+** Full test suite
+Run ``just test`` from ``enthalpy/``. It invokes ``scripts/test.clj`` via
+``clj -M`` and runs 11 integrity suites covering syntax, section registry,
+trainer state shape, emulation map coverage, and the build artifact.
 
 ** Stale server
-``shadow-cljs release`` leaves a background JVM server running. If ``bun run dev``
-prints ``already started``, kill it:
+If ``just dev`` prints ``already started``, stop the background JVM first:
 
 #+BEGIN_SRC sh
-kill $(pgrep -f "shadow.cljs.devtools.cli")
+just stop   # graceful shutdown
+just kill   # force-kill if stop hangs
 #+END_SRC
 
 * Key Files Quick Reference
-| File                               | Purpose                                     |
-|------------------------------------+---------------------------------------------|
-| src/enthalpy/trainer.cljs          | ✏️ Typing trainer state + components        |
-| src/enthalpy/words.cljs            | ✏️ Word list + level-filtered picker        |
-| src/enthalpy/layout.cljs           | ✏️ Key data, cheatsheet, comparison table   |
-| src/enthalpy/views.cljs            | ✏️ Page components                          |
-| src/enthalpy/router.cljs           | ✏️ Routes + navigate helpers                |
-| src/enthalpy/data.cljs             | ✏️ Documentation section registry           |
-| src/enthalpy/sections/s_TOPIC.cljs | ✏️ Add/edit doc section content             |
-| docs/css/style.css                 | ✏️ All styling                              |
-| docs/index.html                    | 🚫 Minimal shell — do not edit              |
-| docs/js/                           | 🚫 Compiled output — do not edit            |
-| app/ fonts/ lib/ scripts/ sounds/  | 📖 ColemakCamp reference — do not ship      |
+| File                               | Purpose                                          |
+|------------------------------------+--------------------------------------------------|
+| src/enthalpy/trainer.cljs          | ✏️ Typing trainer state machine + components     |
+| src/enthalpy/emulation.cljs        | ✏️ US QWERTY → Enthium key map + translate-key   |
+| src/enthalpy/words.cljs            | ✏️ Word list + level-filtered picker             |
+| src/enthalpy/layout.cljs           | ✏️ Key data, cheatsheet, comparison table        |
+| src/enthalpy/views.cljs            | ✏️ Page components                               |
+| src/enthalpy/router.cljs           | ✏️ Routes + navigate helpers                     |
+| src/enthalpy/data.cljs             | ✏️ Documentation section registry                |
+| src/enthalpy/sections/s_TOPIC.cljs | ✏️ Add/edit doc section content                  |
+| docs/css/style.css                 | ✏️ All styling                                   |
+| justfile                           | ✏️ Task runner recipes (just dev / build / test) |
+| scripts/test.clj                   | ✏️ 11-suite integrity test runner                |
+| scripts/check-syntax.sh            | ✏️ Per-file .cljs syntax checker                 |
+| docs/index.html                    | 🚫 Minimal shell — do not edit                   |
+| docs/js/                           | 🚫 Compiled output — do not edit                 |
+| app/ fonts/ lib/ sounds/ styles/   | 📖 ColemakCamp reference — do not ship           |
 
 * Quality Checklist
 Before finalising any change:
-- Syntax check passes — all files print OK
-- ``bun run build`` completes with 0 warnings
-- Trainer: tested in browser — typing loop works, level switch works, reset works
+- ``just check`` passes — all ``.cljs`` files print OK
+- ``just test`` passes — all 11 integrity suites green, exit 0
+- ``just build`` completes with 0 warnings
+- Trainer: tested in browser — typing loop, level switch, reset, US KB emulation
 - Doc sections: ``:id`` unique, registered in ``data.cljs``, excerpt 2–3 sentences
-- No ``style=`` attributes in hiccup
+- No new ``style=`` attributes in hiccup (pre-existing ones are grandfathered)
 - No HTML entities in strings (use Unicode escapes)
 - Mobile layout checked at 768px
+- Run ``just ci`` (verify + build) immediately before committing
 
 * Maintenance
-Last updated: 2026-03-05
+Last updated: 2026-03-05 (emulation layer, justfile, test suite)
 Maintained by: Arik Rahman + AI agents
 
 - Anything like testing or way to fix runtime fixes via commands should be documented in APPENDIX.org
@@ -327,9 +381,10 @@ Documentation is under manus folder. The task should be under its own subfolder 
    ones.
 3. Make one coherent batch of edits for a single goal.
 4. Verify immediately after editing:
-   - Run the syntax check across all ``.cljs`` files.
-   - Run ``bun run build``.
-   - If UI behaviour changed, run ``bun run dev`` and test the relevant route.
+   - Run ``just check`` — all ``.cljs`` files must print OK.
+   - Run ``just test`` — all 11 suites must pass.
+   - Run ``just build`` — must complete with 0 warnings.
+   - If UI behaviour changed, run ``just dev`` and test the relevant route.
 5. Record what changed, what was verified, and any remaining issues before
    starting another batch.
 
@@ -343,10 +398,11 @@ Documentation is under manus folder. The task should be under its own subfolder 
   and section registry in this document as the source of truth.
 
 ** Repo-specific execution rules
-- Use ``bun`` only. Never use ``npm``, ``npx``, or ad hoc package-manager
-  substitutions.
+- Use ``just`` for all tasks. Run ``just`` to see what's available.
+- Use ``bun`` only for raw package operations. Never use ``npm``, ``npx``, or
+  ad hoc package-manager substitutions.
 - Never hand-edit ``docs/js/``.
-- Never add inline ``style=`` attributes in hiccup.
+- Never add new inline ``style=`` attributes in hiccup. Use CSS classes only.
 - Prefer extending existing Reagent atoms, page components, and CSS classes over
   introducing new abstractions unless the task clearly requires it.
 - Keep changes append-only in spirit: avoid unnecessary churn, renames, or broad
@@ -359,6 +415,7 @@ Documentation is under manus folder. The task should be under its own subfolder 
 - Preserve useful error information in notes or task output until the issue is
   resolved. Manus explicitly argues that keeping failed actions and their
   observations visible improves recovery in later steps [page:1].
+- If something unexpected happens and you manage to bugfix it, design it out in test suite
 
 * Verified Spec-Driven Development (VSDD)
 
@@ -378,8 +435,9 @@ a README [web:6].
 2. Edit the spec first when behaviour, structure, or workflow changes.
 3. Implement only what the updated spec requires.
 4. Verify against the spec, not against intuition:
-   - Syntax check prints OK for all ``.cljs`` files.
-   - ``bun run build`` completes with 0 warnings.
+   - ``just check`` prints OK for all ``.cljs`` files.
+   - ``just test`` exits 0 with all suites green.
+   - ``just build`` completes with 0 warnings.
    - Affected route or feature behaves as described in the spec.
    - Mobile layout still works at 768px when relevant.
 5. If implementation and spec disagree, resolve the mismatch explicitly. Do not

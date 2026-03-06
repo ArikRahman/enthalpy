@@ -2,7 +2,7 @@
 ;; scripts/test.clj — Enthalpy project integrity checks
 ;; Run from enthalpy/ with: clj -M scripts/test.clj
 
-(ns test-runner
+(ns test
   (:require [clojure.string :as str]
             [clojure.java.io :as io]))
 
